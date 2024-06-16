@@ -1,14 +1,23 @@
 import asyncio
 import gui
+import time
 
 
-if __name__ == '__main__':
-    loop = asyncio.get_event_loop()
+async def ping(messages_queue, delay=1, ):
+    while True:
+        messages_queue.put_nowait(f'Ping {int(time.time())}')
+        await asyncio.sleep(delay)
 
+
+async def main():
     messages_queue = asyncio.Queue()
     sending_queue = asyncio.Queue()
     status_updates_queue = asyncio.Queue()
 
-    messages_queue.put_nowait('Привет обитателям чата!')
-    messages_queue.put_nowait('Как дела?')
-    loop.run_until_complete(gui.draw(messages_queue, sending_queue, status_updates_queue))
+    await asyncio.gather(
+        gui.draw(messages_queue, sending_queue, status_updates_queue),
+        ping(messages_queue))
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
