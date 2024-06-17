@@ -40,27 +40,49 @@ async def connection_manager(host, port):
         await writer.wait_closed()
 
 
-async def authorise(config):
+async def authorise(reader, writer, token):
+    received_msg = await reader.readline()
+    decoded_msg = received_msg.decode().strip()
+    logging.debug(decoded_msg)
+
+    if decoded_msg != HELLO_PROMPT:
+        raise RuntimeError
+
+    writer.write(f'{token}\n'.encode())
+    await writer.drain()
+    answer = await reader.readline()
+    decoded_answer = answer.decode().strip()
+    logging.debug(decoded_answer)
+    if decoded_answer == 'null':
+        raise ValueError
+    nickname = json.loads(decoded_answer).get('nickname')
+    return nickname
+
+
+async def get_registered_username(config):
     host = config['host']
     port = config['writing_port']
     token = config['token']
     async with connection_manager(host, port) as (reader, writer):
+        return await authorise(reader, writer, token)
+
+async def submit_message(message, config):
+    host = config['host']
+    port = config['writing_port']
+    token = config['token']
+
+    async with connection_manager(host, port) as (reader, writer):
+        nickname = await authorise(reader, writer, token)
         received_msg = await reader.readline()
         decoded_msg = received_msg.decode().strip()
         logging.debug(decoded_msg)
 
-        if decoded_msg != HELLO_PROMPT:
+        if decoded_msg != WELCOME_PROMPT:
             raise RuntimeError
 
-        writer.write(f'{token}\n'.encode())
+        logging.debug(f'Send message from {nickname}:"{message}"')
+        writer.write(f'{message}\n\n'.encode())
         await writer.drain()
-        answer = await reader.readline()
-        decoded_answer = answer.decode().strip()
-        logging.debug(decoded_answer)
-        if decoded_answer == 'null':
-            raise ValueError
-        nickname = json.loads(decoded_answer).get('nickname')
-    return nickname
 
 
 async def write_message_to_file(file_path, content):
@@ -92,10 +114,11 @@ async def print_message(messages_queue, config, ):
         await write_message_to_file(filepath, message)
 
 
-async def read_message_from_gui(sending_queue):
+async def read_message_from_gui(sending_queue, config):
     while True:
-        msg = await sending_queue.get()
-        logging.debug(msg)
+        message = await sending_queue.get()
+        logging.debug(message)
+        await submit_message(f'{message}\n', config)
 
 
 async def main():
@@ -114,12 +137,12 @@ async def main():
     await read_messages_from_file(filepath, messages_queue)
 
     if config.get('token') is not None:
-        nickname = await authorise(config)
+        nickname = await get_registered_username(config)
 
     await asyncio.gather(
         gui.draw(messages_queue, sending_queue, status_updates_queue),
         print_message(messages_queue, config),
-        read_message_from_gui(sending_queue))
+        read_message_from_gui(sending_queue, config))
 
 
 if __name__ == '__main__':
