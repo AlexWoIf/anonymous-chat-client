@@ -69,7 +69,8 @@ class Block:
             self.export_config()
 
     def import_config(self):
-        parser = configargparse.ArgParser(default_config_files=['.env', ])
+        parser = configargparse.ArgParser(default_config_files=['constants.py',
+                                                                '.env', ])
         parser.add('--host', '--HOST', help='server address')
         parser.add('--reading_port', '--READING_PORT', help='reading server port')
         parser.add('--writing_port', '--WRITING_PORT', help='server port')

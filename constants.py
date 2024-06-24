@@ -3,3 +3,7 @@ REGISTER_PROMPT = 'Enter preferred nickname below:'
 WELCOME_PROMPT = 'Welcome to chat! Post your message below. End it with an empty line.'
 ACCEPT_PROMPT = 'Message send. Write more, end message with an empty line.'
 CONNECTION_TIMEOUT = 2
+LOGFILE = './chat.log'
+HOST = 'minechat.dvmn.org'
+READING_PORT = 5000
+WRITING_PORT = 5050
