@@ -4,20 +4,15 @@ import logging
 import socket
 from contextlib import asynccontextmanager
 from functools import wraps
-from tkinter import messagebox, TclError
+from tkinter import TclError, messagebox
+
 import aiofiles
 import configargparse
 from anyio import create_task_group
 from async_timeout import timeout
 
-import exceptions
 import gui
-
-HELLO_PROMPT = 'Hello %username%! Enter your personal hash or leave it empty to create new account.'
-REGISTER_PROMPT = 'Enter preferred nickname below:'
-WELCOME_PROMPT = 'Welcome to chat! Post your message below. End it with an empty line.'
-ACCEPT_PROMPT = 'Message send. Write more, end message with an empty line.'
-CONNECTION_TIMEOUT = 2
+from constants import *
 
 
 def import_config():
