@@ -38,17 +38,16 @@ def retry(handler):
     @wraps(handler)
     async def _wrapper(*args, **kwargs):
         retry = 0
-        while not retry:
+        while True:
             try:
                 await handler(*args, **kwargs)
-                retry = 0
+                break
             except (ConnectionError, socket.gaierror):
-                print(f'Sleeping {retry}sec(s)')
-                asyncio.sleep(retry)
+                logging.error(f'Connection error. Sleeping {retry}sec(s)')
+                await asyncio.sleep(retry)
                 retry = (retry + 1) * 2
             except (ValueError, KeyError):
                 logging.error('Неизвестный токен')
-                print('Неизвестный токен. Проверьте его или зарегистрируйте заново.')
     return _wrapper
 
 
@@ -63,23 +62,7 @@ async def read_messages_from_file(file_path, queues):
             queues['messages_queue'].put_nowait(line.decode('cp1251').strip())
 
 
-# async def retry_async_connection(config, queues):
-#     retry = 0
-#     while not retry:
-#         try:
-#             await handle_connection(config, queues)
-#             retry = 0
-#         except (ConnectionError, socket.gaierror):
-#             print(f'Sleeping {retry}sec(s)')
-#             asyncio.sleep(retry)
-#             retry = (retry + 1) * 2
-#         except (ValueError, KeyError):
-#             logging.error('Неизвестный токен')
-#             print('Неизвестный токен. Проверьте его или зарегистрируйте заново.')
-#             raise exceptions.InvalidTokenError
-
-
-# @retry
+@retry
 async def handle_connection(config, queues):
     async with connection_manager(config, queues) as write_connection:
         queues['status_updates_queue'].put_nowait(
@@ -106,12 +89,11 @@ async def handle_connection(config, queues):
             gui.ReadConnectionStateChanged.ESTABLISHED
         )
 
-        await asyncio.gather(
-            send_messages(write_connection, queues),
-            read_messages(read_connection, queues, config['logfile']),
-            ping_server(write_connection, queues),
-            watch_for_connection(queues)
-        )
+        async with create_task_group() as task_group:
+            task_group.start_soon(send_messages, write_connection, queues)
+            task_group.start_soon(read_messages, read_connection, queues, config['logfile'])
+            task_group.start_soon(ping_server, write_connection, queues)
+            task_group.start_soon(watch_for_connection, queues)
 
 
 async def ping_server(write_connection, queues):
@@ -237,10 +219,10 @@ async def main():
 
     await read_messages_from_file(config['logfile'], queues)
 
-    await asyncio.gather(
-        gui.draw(messages_queue, sending_queue, status_updates_queue),
-        handle_connection(config, queues),
-    )
+    async with create_task_group() as task_group:
+        task_group.start_soon(gui.draw, messages_queue, sending_queue,
+                              status_updates_queue)
+        task_group.start_soon(handle_connection, config, queues)
 
 
 if __name__ == '__main__':
