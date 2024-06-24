@@ -1,23 +1,23 @@
 import asyncio
 import json
 import logging
-# import socket
-# import time
-from async_timeout import timeout
+import socket
 from contextlib import asynccontextmanager
+from functools import wraps
 from tkinter import messagebox
-
 import aiofiles
 import configargparse
+from anyio import create_task_group
+from async_timeout import timeout
 
+import exceptions
 import gui
-
 
 HELLO_PROMPT = 'Hello %username%! Enter your personal hash or leave it empty to create new account.'
 REGISTER_PROMPT = 'Enter preferred nickname below:'
 WELCOME_PROMPT = 'Welcome to chat! Post your message below. End it with an empty line.'
 ACCEPT_PROMPT = 'Message send. Write more, end message with an empty line.'
-CONNECTION_TIMEOUT = 1
+CONNECTION_TIMEOUT = 2
 
 
 def import_config():
@@ -34,6 +34,24 @@ def import_config():
     return vars(args)
 
 
+def retry(handler):
+    @wraps(handler)
+    async def _wrapper(*args, **kwargs):
+        retry = 0
+        while not retry:
+            try:
+                await handler(*args, **kwargs)
+                retry = 0
+            except (ConnectionError, socket.gaierror):
+                print(f'Sleeping {retry}sec(s)')
+                asyncio.sleep(retry)
+                retry = (retry + 1) * 2
+            except (ValueError, KeyError):
+                logging.error('Неизвестный токен')
+                print('Неизвестный токен. Проверьте его или зарегистрируйте заново.')
+    return _wrapper
+
+
 async def write_message_to_file(file_path, content):
     async with aiofiles.open(file_path, mode='a', ) as f:
         await f.write(content)
@@ -45,6 +63,23 @@ async def read_messages_from_file(file_path, queues):
             queues['messages_queue'].put_nowait(line.decode('cp1251').strip())
 
 
+# async def retry_async_connection(config, queues):
+#     retry = 0
+#     while not retry:
+#         try:
+#             await handle_connection(config, queues)
+#             retry = 0
+#         except (ConnectionError, socket.gaierror):
+#             print(f'Sleeping {retry}sec(s)')
+#             asyncio.sleep(retry)
+#             retry = (retry + 1) * 2
+#         except (ValueError, KeyError):
+#             logging.error('Неизвестный токен')
+#             print('Неизвестный токен. Проверьте его или зарегистрируйте заново.')
+#             raise exceptions.InvalidTokenError
+
+
+# @retry
 async def handle_connection(config, queues):
     async with connection_manager(config, queues) as write_connection:
         queues['status_updates_queue'].put_nowait(
@@ -74,21 +109,42 @@ async def handle_connection(config, queues):
         await asyncio.gather(
             send_messages(write_connection, queues),
             read_messages(read_connection, queues, config['logfile']),
+            ping_server(write_connection, queues),
             watch_for_connection(queues)
         )
+
+
+async def ping_server(write_connection, queues):
+    while True:
+        message = ''
+
+        reader, writer = write_connection
+
+        received_msg = await reader.readline()
+        decoded_msg = received_msg.decode().strip()
+        logging.debug(decoded_msg)
+
+        if decoded_msg != WELCOME_PROMPT and decoded_msg != ACCEPT_PROMPT:
+            raise socket.gaierror
+
+        # logging.debug(f'Send message from {nickname}:"{message}"')
+        writer.write(f'{message}\n\n'.encode())
+        await writer.drain()
+        queues['watchdog_queue'].put_nowait('Ping message sent')
+        await asyncio.sleep(CONNECTION_TIMEOUT)
 
 
 async def watch_for_connection(queues):
     while True:
         try:
-            async with timeout(CONNECTION_TIMEOUT) as cm:
+            async with timeout(CONNECTION_TIMEOUT*2) as cm:
                 message = await queues['watchdog_queue'].get()
             queues['status_updates_queue'].put_nowait(
                 gui.ReadConnectionStateChanged.ESTABLISHED
             )
         except asyncio.TimeoutError:
             if cm.expired:
-                message = f'{CONNECTION_TIMEOUT}s Timeout is elapsed'
+                message = f'{CONNECTION_TIMEOUT*2}s Timeout is elapsed'
             queues['status_updates_queue'].put_nowait(
                 gui.ReadConnectionStateChanged.CLOSED
             )
@@ -116,7 +172,7 @@ async def send_messages(write_connection, queues):
         logging.debug(decoded_msg)
 
         if decoded_msg != WELCOME_PROMPT and decoded_msg != ACCEPT_PROMPT:
-            raise RuntimeError
+            raise socket.gaierror
 
         # logging.debug(f'Send message from {nickname}:"{message}"')
         writer.write(f'{message}\n\n'.encode())
@@ -178,7 +234,7 @@ async def main():
     queues = {'messages_queue': messages_queue, 'sending_queue': sending_queue,
               'status_updates_queue': status_updates_queue,
               'watchdog_queue': watchdog_queue, }
-    
+
     await read_messages_from_file(config['logfile'], queues)
 
     await asyncio.gather(
