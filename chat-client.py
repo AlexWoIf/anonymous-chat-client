@@ -4,7 +4,7 @@ import logging
 import socket
 from contextlib import asynccontextmanager
 from functools import wraps
-from tkinter import messagebox
+from tkinter import messagebox, TclError
 import aiofiles
 import configargparse
 from anyio import create_task_group
@@ -91,7 +91,8 @@ async def handle_connection(config, queues):
 
         async with create_task_group() as task_group:
             task_group.start_soon(send_messages, write_connection, queues)
-            task_group.start_soon(read_messages, read_connection, queues, config['logfile'])
+            task_group.start_soon(read_messages,
+                                  read_connection, queues, config['logfile'])
             task_group.start_soon(ping_server, write_connection, queues)
             task_group.start_soon(watch_for_connection, queues)
 
@@ -226,4 +227,7 @@ async def main():
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except* (TclError, KeyboardInterrupt):
+        pass
